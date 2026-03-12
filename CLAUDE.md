@@ -104,6 +104,14 @@ notebooklm login
 
 This opens a browser window for Google sign-in. After authenticating, credentials are saved to `~/.notebooklm/storage_state.json` and reused automatically.
 
+**Headless / cloud environments (no display):** Use `xvfb-run` to create a virtual framebuffer, then connect via VNC to interact with the browser:
+
+```bash
+xvfb-run --auto-servernum notebooklm login
+```
+
+Alternatively, copy `storage_state.json` from a machine where you've already logged in, or set the `NOTEBOOKLM_AUTH_JSON` environment variable with its contents.
+
 ### Verify Authentication
 
 ```bash
@@ -177,13 +185,18 @@ All available styles:
 |---------|---------|---------|
 | `yt-dlp` | 2026.3.3+ | YouTube metadata scraping |
 | `notebooklm-py` | 0.3.4+ | NotebookLM Python API |
-| `playwright` | latest | Browser-based authentication |
-| Chromium | latest | OAuth login browser |
+| `playwright` | 1.56.0 | Browser-based authentication (must match Chromium rev) |
+| Chromium | 1194 (rev) | OAuth login browser |
 
 ### Reinstall if needed:
 ```bash
+# Use setup.sh for automated installation with correct versions:
+bash setup.sh
+
+# Or manually (pin playwright to match pre-installed Chromium 1194):
 pip install yt-dlp
 pip install "notebooklm-py[browser]"
+pip install "playwright==1.56.0"
 playwright install chromium
 notebooklm skill install
 ```
