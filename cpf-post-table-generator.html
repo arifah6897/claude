@@ -24078,6 +24078,42 @@ function confidenceBadge(post) {
 
 // ─── PLATFORM STATE ──────────────────────────────────────────────────────────
 
+const DAY_ABBREVS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTH_MAP   = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+
+function parseDateToDow(dateStr) {
+  const m = dateStr.match(/(\d{1,2})\s+([A-Za-z]{3})/);
+  if (!m) return null;
+  const day   = parseInt(m[1]);
+  const month = MONTH_MAP[m[2].toLowerCase()];
+  if (month === undefined) return null;
+  const year  = new Date().getFullYear();
+  const d     = new Date(year, month, day);
+  // If the date looks like it's already passed by >60 days, assume next year
+  if ((new Date() - d) > 60 * 86400000) d.setFullYear(year + 1);
+  return d.getDay(); // 0=Sun … 6=Sat
+}
+
+function isTrendjackOrGreeting(title) {
+  return /\btj\b|\[tj\]|\[wild-tj\]|good friday|easter|christmas|new year|deepavali|hari raya|\bcny\b|chinese new year|mother.{0,5}day|father.{0,5}day|national day|greeting/i.test(title);
+}
+
+function formatPostDateTime(post) {
+  if (!activePlatform) return post.date;
+  const dow       = parseDateToDow(post.date);
+  const dayLabel  = dow !== null ? ` (${DAY_ABBREVS[dow]})` : '';
+  const isWeekend = dow === 0 || dow === 6;
+  const isTJ      = isTrendjackOrGreeting(post.title);
+
+  let time = '';
+  if      (activePlatform === 'fb') time = isWeekend ? '11AM' : '9PM';
+  else if (activePlatform === 'ig') time = '9:30PM';
+  else if (activePlatform === 'tg') time = isTJ ? '10AM' : '6PM';
+  else if (activePlatform === 'wa') time = isTJ ? '10AM' : '6:30PM';
+
+  return `${post.date}${dayLabel}${time ? ', ' + time : ''}`;
+}
+
 let activePlatform = null;
 
 function captionLabel() {
@@ -24374,7 +24410,7 @@ async function generateDocx() {
         borders, width: { size: 2255, type: WidthType.DXA }, margins: cm,
         verticalAlign: VerticalAlign.TOP,
         children: [
-          para([txt(post.date)]),
+          para([txt(formatPostDateTime(post))]),
           para([txt(post.title)]),
           para([txt('')]),
           para([txt('Life Stage / Segment:')]),
@@ -24477,7 +24513,7 @@ function buildOutlookTableHtml() {
 
   function leftCellHtml(post) {
     const rows = [
-      `<b>${post.date}</b>`,
+      `<b>${formatPostDateTime(post)}</b>`,
       post.title,
       '',
       'Life Stage / Segment:',
