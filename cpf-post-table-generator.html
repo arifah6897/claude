@@ -23406,33 +23406,6 @@ var __async = (__this, __arguments, generator) => {
 </header>
 
 <div class="main">
-  <!-- REPAIR BROKEN EML -->
-  <div class="repair-section" id="repair-section">
-    <div class="repair-header" onclick="toggleRepair()">
-      <span style="font-size:18px;">🔧</span>
-      <h2>Fix a Broken Email Table</h2>
-      <span class="repair-badge">Upload .eml</span>
-      <span class="chevron" id="repair-chevron">▼</span>
-    </div>
-    <div class="repair-body">
-      <div class="upload-zone" id="upload-zone">
-        <input type="file" accept=".eml,.htm,.html" id="eml-file-input" onchange="handleEmlUpload(this.files[0])" />
-        <div class="upload-icon">📧</div>
-        <div class="upload-text">Drop your .eml file here or click to browse</div>
-        <div class="upload-hint">Supports .eml files exported from Outlook or Apple Mail</div>
-      </div>
-      <div class="repair-preview" id="repair-preview">
-        <div class="repair-preview-title" id="repair-preview-title">Posts detected</div>
-        <div class="repair-posts" id="repair-posts-list"></div>
-        <div class="repair-actions">
-          <button class="btn btn-repair" onclick="repairDownload('eml')">🔧 Download Fixed .eml</button>
-          <button class="btn btn-repair" onclick="repairDownload('html')">🔧 Download Fixed .html</button>
-          <button class="btn btn-download" onclick="repairDownload('docx')">↓ Download as .docx</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- AI TAG INFERENCE SETTINGS -->
   <div class="ai-section" id="ai-section">
     <div class="ai-header" onclick="toggleAIPanel()">
@@ -23481,29 +23454,7 @@ var __async = (__this, __arguments, generator) => {
 
   <!-- ADD POST -->
   <div class="add-section">
-    <div class="add-tabs">
-      <button class="add-tab active" onclick="switchTab('single')">＋ Single Post</button>
-      <button class="add-tab" onclick="switchTab('bulk')">⇥ Bulk Paste</button>
-    </div>
-
-    <!-- SINGLE POST PANEL -->
-    <div class="add-panel active" id="panel-single">
-      <h2>Add New Post</h2>
-      <div class="add-row">
-        <div>
-          <label>Date</label>
-          <input type="text" id="input-date" placeholder="e.g. 1 May" />
-        </div>
-        <div>
-          <label>Post Title</label>
-          <input type="text" id="input-title" placeholder="e.g. [WILD-BAU] CPF Webinar: PYR45 Publicity" />
-        </div>
-        <button class="btn btn-primary" onclick="addPost()">＋ Add Post</button>
-      </div>
-    </div>
-
-    <!-- BULK PASTE PANEL -->
-    <div class="add-panel" id="panel-bulk">
+    <div class="add-panel active" id="panel-bulk">
       <h2>Bulk Paste</h2>
       <textarea class="bulk-area" id="bulk-input" placeholder="Paste your posts here, one per line. Each line should start with the date followed by the title, e.g.:
 
@@ -24203,7 +24154,6 @@ async function addBulkPosts() {
 
   document.getElementById('bulk-input').value = '';
   document.getElementById('bulk-preview').textContent = '';
-  switchTab('single');
   renderPosts();
   showToast(`✓ Added ${parsed.length} post${parsed.length !== 1 ? 's' : ''} successfully`, 'success');
 
@@ -24387,13 +24337,6 @@ function refreshCard(id) {
   renderPosts();
 }
 
-// ─── ENTER KEY ────────────────────────────────────────────────────────────────
-document.getElementById('input-title').addEventListener('keydown', e => {
-  if (e.key === 'Enter') addPost();
-});
-document.getElementById('input-date').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('input-title').focus();
-});
 
 // ─── DOCX GENERATION ──────────────────────────────────────────────────────────
 
