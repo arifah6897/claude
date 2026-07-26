@@ -286,6 +286,32 @@ def write_json(path, groups, sim):
         json.dump(data, f, indent=2)
 
 
+STRATEGY_DESCRIPTION = (
+    "How tables were matched: everyone's survey answers were compared pairwise to find who has the most "
+    "in common — mainly the topics that energise them, and secondarily what they're hoping to get out of "
+    "Brunch Buddies. People at the same career stage got a small extra boost to sit together. Tables were "
+    "then built one at a time, starting from the strongest-matching pair and adding whoever fits best with "
+    "the group so far, until each table reached its target size. This is a best-effort match, not a perfect "
+    "one — with a limited set of topics/goals to choose from, some tables naturally land a stronger overlap "
+    "than others; the Compatibility Score on the Table Summary tab shows how strong each table's match is "
+    "(higher = more shared interests)."
+)
+
+# Pastel palette, one color per table, cycling if there are more tables than colors.
+GROUP_COLORS = [
+    "BDD7EE",  # blue
+    "C6E0B4",  # green
+    "D9D2E9",  # purple
+    "F8CBAD",  # peach
+    "F4CCCC",  # rose
+    "D0E0E3",  # teal
+    "FCE5CD",  # tan
+    "CFE2F3",  # sky
+    "D9EAD3",  # sage
+    "EAD1DC",  # mauve
+]
+
+
 def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_label="Flagged"):
     try:
         from openpyxl import Workbook
@@ -302,12 +328,15 @@ def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_la
     header_font = Font(name=font_name, bold=True, color="FFFFFF", size=11)
     title_font = Font(name=font_name, bold=True, size=14)
     subtitle_font = Font(name=font_name, italic=True, size=9, color="595959")
-    band_fills = [PatternFill("solid", fgColor="EAF1FB"), PatternFill("solid", fgColor="FFFFFF")]
-    spread_fill = PatternFill("solid", fgColor="FFF2A8")
+    desc_font = Font(name=font_name, size=10, color="333333")
+    group_fills = [PatternFill("solid", fgColor=c) for c in GROUP_COLORS]
+    spread_fill = PatternFill("solid", fgColor="FFEB84")
     body_font = Font(name=font_name, size=10)
     spread_font = Font(name=font_name, size=10, bold=True)
     thin = Side(style="thin", color="BFBFBF")
+    thick_yellow = Side(style="medium", color="BF9000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    spread_border = Border(left=thick_yellow, right=thick_yellow, top=thick_yellow, bottom=thick_yellow)
 
     wb = Workbook()
 
@@ -317,12 +346,25 @@ def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_la
     ws["A1"].font = title_font
     ws["A2"] = f"Generated {datetime.date.today().isoformat()} | {len(respondents)} attendees | {len(groups)} tables"
     ws["A2"].font = subtitle_font
+
+    ws.merge_cells("A3:F6")
+    desc_cell = ws["A3"]
+    desc_cell.value = STRATEGY_DESCRIPTION
+    desc_cell.font = desc_font
+    desc_cell.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[3].height = 90
+
+    legend_row = 7
+    ws.cell(row=legend_row, column=1, value="Legend:").font = Font(name=font_name, bold=True, size=9)
     if spread_ids:
-        ws["A3"] = f"Highlighted rows = {spread_label} (spread one per table)"
-        ws["A3"].font = subtitle_font
+        ws.cell(row=legend_row, column=2, value=f"Yellow + bold = {spread_label} (spread one per table)")
+        ws.cell(row=legend_row, column=2).font = subtitle_font
+    else:
+        ws.cell(row=legend_row, column=2, value="Each table has its own row color")
+        ws.cell(row=legend_row, column=2).font = subtitle_font
 
     headers = ["Table", "Name", "Career Stage", "Goals", "Topics", "Notes"]
-    header_row = 5
+    header_row = 9
     for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=c, value=h)
         cell.font = header_font
@@ -332,10 +374,9 @@ def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_la
 
     r = header_row + 1
     for gi, group in enumerate(groups):
-        band = band_fills[gi % 2]
+        fill = group_fills[gi % len(group_fills)]
         for member in group:
             is_spread = member.id in spread_ids
-            fill = spread_fill if is_spread else band
             font = spread_font if is_spread else body_font
             name = f"{member.label} ({spread_label})" if is_spread else member.label
             values = [gi + 1, name, member.stage,
@@ -343,8 +384,8 @@ def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_la
             for c, v in enumerate(values, start=1):
                 cell = ws.cell(row=r, column=c, value=v)
                 cell.font = font
-                cell.fill = fill
-                cell.border = border
+                cell.fill = spread_fill if is_spread else fill
+                cell.border = spread_border if is_spread else border
                 cell.alignment = Alignment(vertical="top", wrap_text=(c in (4, 5, 6)))
             r += 1
 
@@ -356,15 +397,17 @@ def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_la
     ws2 = wb.create_sheet("Table Summary")
     ws2["A1"] = "Brunch Buddies — Table Summary"
     ws2["A1"].font = title_font
+    ws2["A2"] = "Each row is color-matched to its table on the Table Assignments tab."
+    ws2["A2"].font = subtitle_font
     headers2 = ["Table", "Size", "Compatibility Score", "Shared Topics", "Shared Goals", "Organizer Notes"]
     for c, h in enumerate(headers2, start=1):
-        cell = ws2.cell(row=3, column=c, value=h)
+        cell = ws2.cell(row=4, column=c, value=h)
         cell.font = header_font
         cell.fill = header_fill
         cell.border = border
         cell.alignment = Alignment(vertical="center", wrap_text=True)
 
-    r = 4
+    r = 5
     for gi, group in enumerate(groups):
         score = group_quality(group, sim)
         shared_topics = set.intersection(*[m.topics for m in group]) if group else set()
@@ -377,13 +420,13 @@ def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_la
         for c, v in enumerate(row_vals, start=1):
             cell = ws2.cell(row=r, column=c, value=v)
             cell.font = body_font
-            cell.fill = band_fills[gi % 2]
+            cell.fill = group_fills[gi % len(group_fills)]
             cell.border = border
             cell.alignment = Alignment(vertical="top", wrap_text=(c in (4, 5, 6)))
         r += 1
 
-    ws2.freeze_panes = "A4"
-    ws2.auto_filter.ref = f"A3:F{r - 1}"
+    ws2.freeze_panes = "A5"
+    ws2.auto_filter.ref = f"A4:F{r - 1}"
     for col, w in {"A": 8, "B": 8, "C": 18, "D": 40, "E": 34, "F": 40}.items():
         ws2.column_dimensions[col].width = w
 
