@@ -178,7 +178,10 @@ def plan_group_sizes(n, target_size=4, min_size=2, max_size=6):
 # Greedy group assignment
 # ---------------------------------------------------------------------------
 
-def assign_groups(respondents, sim, sizes):
+def assign_groups(respondents, sim, sizes, spread_ids=frozenset()):
+    """Greedily build groups. If spread_ids is given, avoid putting more than
+    one member of that set in the same group whenever an alternative exists
+    (e.g. keeping committee members spread one-per-table)."""
     unassigned = {r.id: r for r in respondents}
     groups = []
 
@@ -191,10 +194,10 @@ def assign_groups(respondents, sim, sizes):
             break
 
         ids = list(unassigned.keys())
-        best_pair = max(
-            itertools.combinations(ids, 2),
-            key=lambda pq: sim.get((pq[0], pq[1]), 0.0),
-        )
+        pairs = list(itertools.combinations(ids, 2))
+        non_conflict = [p for p in pairs if not (p[0] in spread_ids and p[1] in spread_ids)]
+        pool = non_conflict if non_conflict else pairs
+        best_pair = max(pool, key=lambda pq: sim.get((pq[0], pq[1]), 0.0))
         group_ids = [best_pair[0], best_pair[1]]
         del unassigned[best_pair[0]]
         del unassigned[best_pair[1]]
@@ -203,7 +206,15 @@ def assign_groups(respondents, sim, sizes):
             def avg_sim(candidate_id):
                 return sum(sim.get((candidate_id, gid), 0.0) for gid in group_ids) / len(group_ids)
 
-            best_candidate = max(unassigned.keys(), key=avg_sim)
+            group_has_spread = any(gid in spread_ids for gid in group_ids)
+            if group_has_spread:
+                candidates = [cid for cid in unassigned if cid not in spread_ids]
+                if not candidates:
+                    candidates = list(unassigned.keys())
+            else:
+                candidates = list(unassigned.keys())
+
+            best_candidate = max(candidates, key=avg_sim)
             group_ids.append(best_candidate)
             del unassigned[best_candidate]
 
@@ -275,6 +286,110 @@ def write_json(path, groups, sim):
         json.dump(data, f, indent=2)
 
 
+def write_xlsx(path, respondents, groups, sim, spread_ids=frozenset(), spread_label="Flagged"):
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    except ImportError:
+        raise SystemExit(
+            "Writing .xlsx output requires openpyxl. Install it with: pip install openpyxl"
+        )
+
+    import datetime
+
+    font_name = "Arial"
+    header_fill = PatternFill("solid", fgColor="2F5496")
+    header_font = Font(name=font_name, bold=True, color="FFFFFF", size=11)
+    title_font = Font(name=font_name, bold=True, size=14)
+    subtitle_font = Font(name=font_name, italic=True, size=9, color="595959")
+    band_fills = [PatternFill("solid", fgColor="EAF1FB"), PatternFill("solid", fgColor="FFFFFF")]
+    spread_fill = PatternFill("solid", fgColor="FFF2A8")
+    body_font = Font(name=font_name, size=10)
+    spread_font = Font(name=font_name, size=10, bold=True)
+    thin = Side(style="thin", color="BFBFBF")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    wb = Workbook()
+
+    ws = wb.active
+    ws.title = "Table Assignments"
+    ws["A1"] = "Brunch Buddies — Table Assignments"
+    ws["A1"].font = title_font
+    ws["A2"] = f"Generated {datetime.date.today().isoformat()} | {len(respondents)} attendees | {len(groups)} tables"
+    ws["A2"].font = subtitle_font
+    if spread_ids:
+        ws["A3"] = f"Highlighted rows = {spread_label} (spread one per table)"
+        ws["A3"].font = subtitle_font
+
+    headers = ["Table", "Name", "Career Stage", "Goals", "Topics", "Notes"]
+    header_row = 5
+    for c, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=c, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(vertical="center")
+        cell.border = border
+
+    r = header_row + 1
+    for gi, group in enumerate(groups):
+        band = band_fills[gi % 2]
+        for member in group:
+            is_spread = member.id in spread_ids
+            fill = spread_fill if is_spread else band
+            font = spread_font if is_spread else body_font
+            name = f"{member.label} ({spread_label})" if is_spread else member.label
+            values = [gi + 1, name, member.stage,
+                      "; ".join(sorted(member.goals)), "; ".join(sorted(member.topics)), member.notes]
+            for c, v in enumerate(values, start=1):
+                cell = ws.cell(row=r, column=c, value=v)
+                cell.font = font
+                cell.fill = fill
+                cell.border = border
+                cell.alignment = Alignment(vertical="top", wrap_text=(c in (4, 5, 6)))
+            r += 1
+
+    ws.freeze_panes = f"A{header_row + 1}"
+    ws.auto_filter.ref = f"A{header_row}:F{r - 1}"
+    for col, w in {"A": 8, "B": 24, "C": 20, "D": 42, "E": 42, "F": 32}.items():
+        ws.column_dimensions[col].width = w
+
+    ws2 = wb.create_sheet("Table Summary")
+    ws2["A1"] = "Brunch Buddies — Table Summary"
+    ws2["A1"].font = title_font
+    headers2 = ["Table", "Size", "Compatibility Score", "Shared Topics", "Shared Goals", "Organizer Notes"]
+    for c, h in enumerate(headers2, start=1):
+        cell = ws2.cell(row=3, column=c, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+    r = 4
+    for gi, group in enumerate(groups):
+        score = group_quality(group, sim)
+        shared_topics = set.intersection(*[m.topics for m in group]) if group else set()
+        shared_goals = set.intersection(*[m.goals for m in group]) if group else set()
+        org_notes = "; ".join(f"{m.label}: {m.notes}" for m in group if m.notes)
+        row_vals = [gi + 1, len(group), round(score, 2),
+                    "; ".join(sorted(shared_topics)) or "—",
+                    "; ".join(sorted(shared_goals)) or "—",
+                    org_notes or "—"]
+        for c, v in enumerate(row_vals, start=1):
+            cell = ws2.cell(row=r, column=c, value=v)
+            cell.font = body_font
+            cell.fill = band_fills[gi % 2]
+            cell.border = border
+            cell.alignment = Alignment(vertical="top", wrap_text=(c in (4, 5, 6)))
+        r += 1
+
+    ws2.freeze_panes = "A4"
+    ws2.auto_filter.ref = f"A3:F{r - 1}"
+    for col, w in {"A": 8, "B": 8, "C": 18, "D": 40, "E": 34, "F": 40}.items():
+        ws2.column_dimensions[col].width = w
+
+    wb.save(path)
+
+
 # ---------------------------------------------------------------------------
 # Demo data
 # ---------------------------------------------------------------------------
@@ -334,7 +449,10 @@ def main():
     parser.add_argument("csv_path", nargs="?", help="Path to survey responses CSV (e.g. Google Forms export)")
     parser.add_argument("--group-size", type=int, default=4, help="Target group size (default: 4)")
     parser.add_argument("--delimiter", default=",", help="Delimiter used within multi-select cells (default: ',')")
-    parser.add_argument("--output", help="Write groups to this file (.csv or .json based on extension)")
+    parser.add_argument("--output", help="Write groups to this file (.csv, .json, or .xlsx based on extension)")
+    parser.add_argument("--spread-tag", action="append", default=[],
+                         help="Substring to match (case-insensitive) against each respondent's notes; "
+                              "matching people are spread one-per-table where possible. Repeatable.")
     parser.add_argument("--format", choices=["text", "json"], default="text", help="Console output format")
     parser.add_argument("--topic-weight", type=float, default=1.5)
     parser.add_argument("--goal-weight", type=float, default=1.0)
@@ -372,10 +490,17 @@ def main():
         print("Need at least 2 respondents to form groups.", file=sys.stderr)
         sys.exit(1)
 
+    spread_ids = set()
+    if args.spread_tag:
+        tags = [t.lower() for t in args.spread_tag]
+        spread_ids = {r.id for r in respondents if any(t in r.notes.lower() for t in tags)}
+        print(f"Spreading {len(spread_ids)} tagged respondent(s) one-per-table "
+              f"(matched: {', '.join(args.spread_tag)})\n")
+
     weights = {"topics": args.topic_weight, "goals": args.goal_weight, "stage": args.stage_weight}
     sim = build_similarity_matrix(respondents, weights)
     sizes = plan_group_sizes(len(respondents), target_size=args.group_size)
-    groups = assign_groups(respondents, sim, sizes)
+    groups = assign_groups(respondents, sim, sizes, spread_ids=spread_ids)
 
     overall_avg = sum(group_quality(g, sim) for g in groups) / len(groups)
     print(f"Matched {len(respondents)} respondents into {len(groups)} tables "
@@ -398,6 +523,9 @@ def main():
     if args.output:
         if args.output.endswith(".json"):
             write_json(args.output, groups, sim)
+        elif args.output.endswith(".xlsx"):
+            spread_label = args.spread_tag[0] if args.spread_tag else "Flagged"
+            write_xlsx(args.output, respondents, groups, sim, spread_ids=spread_ids, spread_label=spread_label)
         else:
             write_csv(args.output, groups)
         print(f"Wrote groups to {args.output}")
